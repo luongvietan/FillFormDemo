@@ -16,6 +16,10 @@ const FormComponent = () => {
   const [message, setMessage] = useState('');
   // State for validation errors
   const [errors, setErrors] = useState({});
+  // State for loading status
+  const [isLoading, setIsLoading] = useState(false);
+  // State for success animation
+  const [showSuccess, setShowSuccess] = useState(false);
 
   // Initialize IndexedDB when component mount
   useEffect(() => {
@@ -24,6 +28,11 @@ const FormComponent = () => {
 
   // Function to initialize IndexedDB
   const initIndexedDB = () => {
+    createDatabase();
+  };
+  
+  // Function to create database
+  const createDatabase = () => {
     // Open or create new database if not exists
     const request = indexedDB.open('FormFillDB', 1);
 
@@ -33,18 +42,42 @@ const FormComponent = () => {
       
       // Create object store if not exists
       if (!db.objectStoreNames.contains('formStore')) {
+        console.log('Creating formStore object store');
         db.createObjectStore('formStore', { keyPath: 'id' });
       }
     };
 
     // Handle error
     request.onerror = (event) => {
-      setMessage('Error when access IndexedDB: ' + event.target.error);
+      console.error('Database error:', event.target.error);
+      setMessage('Error when connect to IndexedDB: ' + event.target.error);
     };
 
     // Success message
-    request.onsuccess = () => {
-      setMessage('Connected to IndexedDB successfully');
+    request.onsuccess = (event) => {
+      const db = event.target.result;
+      
+      // Check if object store exists
+      if (!db.objectStoreNames.contains('formStore')) {
+        // If not exists, close connection and create new with new version
+        db.close();
+        const newVersionRequest = indexedDB.open('FormFillDB', db.version + 1);
+        
+        newVersionRequest.onupgradeneeded = (upgradeEvent) => {
+          const newDb = upgradeEvent.target.result;
+          newDb.createObjectStore('formStore', { keyPath: 'id' });
+        };
+        
+        newVersionRequest.onsuccess = () => {
+          setMessage('Connected to IndexedDB successfully');
+        };
+        
+        newVersionRequest.onerror = (errorEvent) => {
+          setMessage('Error when upgrade IndexedDB: ' + errorEvent.target.error);
+        };
+      } else {
+        setMessage('Connected to IndexedDB successfully');
+      }
     };
   };
 
@@ -70,7 +103,7 @@ const FormComponent = () => {
     const newErrors = {};
     
     if (!formData.firstName.trim()) {
-      newErrors.firstName = 'First Name is required';
+      newErrors.firstName = 'First name is required';
     }
     
     if (!formData.email.trim()) {
@@ -88,9 +121,11 @@ const FormComponent = () => {
     try {
       // Validate form data before saving
       if (!validateForm()) {
-        setMessage('Please fix the form errors');
+        setMessage('Please fix the errors in the form');
         return;
       }
+
+      setIsLoading(true);
 
       // Call API backend to encrypt data
       const response = await fetch('http://localhost:3001/api/saveFormData', {
@@ -105,7 +140,7 @@ const FormComponent = () => {
       });
 
       if (!response.ok) {
-        throw new Error('Connection error with server');
+        throw new Error('Error when connect to server');
       }
 
       const encryptedData = await response.json();
@@ -115,6 +150,15 @@ const FormComponent = () => {
       
       request.onsuccess = (event) => {
         const db = event.target.result;
+        // Check if object store exists
+        if (!db.objectStoreNames.contains('formStore')) {
+          setMessage('Error: Object store not found. Reinitializing database...');
+          db.close();
+          initIndexedDB(); // Reinitialize database
+          setIsLoading(false);
+          return;
+        }
+        
         const transaction = db.transaction('formStore', 'readwrite');
         const store = transaction.objectStore('formStore');
         
@@ -128,30 +172,50 @@ const FormComponent = () => {
         });
         
         transaction.oncomplete = () => {
-          setMessage('Data saved successfully');
+          setMessage('Save data successfully');
+          setIsLoading(false);
+          setShowSuccess(true);
+          setTimeout(() => setShowSuccess(false), 2000);
         };
         
         transaction.onerror = (error) => {
+          console.error('Transaction error:', error.target.error);
           setMessage('Error when save data: ' + error.target.error);
+          setIsLoading(false);
         };
       };
       
       request.onerror = (event) => {
-        setMessage('Error when connect IndexedDB: ' + event.target.error);
+        console.error('Database error:', event.target.error);
+        setMessage('Error when connect to IndexedDB: ' + event.target.error);
+        setIsLoading(false);
       };
     } catch (error) {
+      console.error('Save error:', error);
       setMessage('Error: ' + error.message);
+      setIsLoading(false);
     }
   };
 
   // Read data from IndexedDB and decrypt via backend
   const handleLoad = async () => {
     try {
+      setIsLoading(true);
       // Open connection to IndexedDB
       const request = indexedDB.open('FormFillDB', 1);
       
       request.onsuccess = async (event) => {
         const db = event.target.result;
+        
+        // Check if object store exists
+        if (!db.objectStoreNames.contains('formStore')) {
+          setMessage('Error: Object store not found. Reinitializing database...');
+          db.close();
+          initIndexedDB(); // Reinitialize database
+          setIsLoading(false);
+          return;
+        }
+        
         const transaction = db.transaction('formStore', 'readonly');
         const store = transaction.objectStore('formStore');
         
@@ -163,6 +227,7 @@ const FormComponent = () => {
           
           if (!storedData) {
             setMessage('Data not found in IndexedDB');
+            setIsLoading(false);
             return;
           }
           
@@ -172,6 +237,7 @@ const FormComponent = () => {
           
           if (currentDate > expiryDate) {
             setMessage('Data expired');
+            setIsLoading(false);
             return;
           }
           
@@ -189,86 +255,131 @@ const FormComponent = () => {
             });
             
             if (!response.ok) {
-              throw new Error('Connection error with server');
+              throw new Error('Error when connect to server');
             }
             
             const decryptedData = await response.json();
             
             // Update form with decrypted data
             setFormData(decryptedData.data);
-            setMessage('Data loaded successfully');
+            setMessage('Load data successfully');
+            setIsLoading(false);
+            setShowSuccess(true);
+            setTimeout(() => setShowSuccess(false), 2000);
           } catch (fetchError) {
             console.error('Error when call API:', fetchError);
-            setMessage('Error: ' + fetchError.message);
+            setMessage('Error when call API: ' + fetchError.message);
+            setIsLoading(false);
           }
         };
         
         getRequest.onerror = (error) => {
+          console.error('Get request error:', error.target.error);
           setMessage('Error when read data: ' + error.target.error);
+          setIsLoading(false);
         };
       };
       
       request.onerror = (event) => {
-        setMessage('Error when connect IndexedDB: ' + event.target.error);
+        console.error('Database error:', event.target.error);
+        setMessage('Error when connect to IndexedDB: ' + event.target.error);
+        setIsLoading(false);
       };
     } catch (error) {
+      console.error('Load error:', error);
       setMessage('Error: ' + error.message);
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="max-w-md mx-auto mt-10 p-6 bg-white rounded-lg shadow-lg">
-      <h1 className="text-xl font-bold mb-4">FormFill Demo</h1>
-      
-      <div className="mb-4">
-        <label className="block text-gray-700 mb-2">First Name:</label>
-        <input
-          type="text"
-          name="firstName"
-          value={formData.firstName}
-          onChange={handleInputChange}
-          className={`w-full px-3 py-2 border ${errors.firstName ? 'border-red-500' : 'border-gray-300'} rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500`}
-        />
-        {errors.firstName && (
-          <p className="text-red-500 text-sm mt-1">{errors.firstName}</p>
-        )}
-      </div>
-      
-      <div className="mb-4">
-        <label className="block text-gray-700 mb-2">Email:</label>
-        <input
-          type="email"
-          name="email"
-          value={formData.email}
-          onChange={handleInputChange}
-          className={`w-full px-3 py-2 border ${errors.email ? 'border-red-500' : 'border-gray-300'} rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500`}
-        />
-        {errors.email && (
-          <p className="text-red-500 text-sm mt-1">{errors.email}</p>
-        )}
-      </div>
-      
-      <div className="flex space-x-4">
-        <button
-          onClick={handleSave}
-          className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          Save
-        </button>
-        
-        <button
-          onClick={handleLoad}
-          className="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500"
-        >
-          Load
-        </button>
-      </div>
-      
-      {message && (
-        <div className={`mt-4 p-2 ${message.includes('Error') ? 'bg-red-100 border-red-300' : message.includes('success') ? 'bg-green-100 border-green-300' : 'bg-gray-100 border-gray-300'} border rounded`}>
-          {message}
+    <div className="max-w-md mx-auto bg-white rounded-xl shadow-md overflow-hidden md:max-w-2xl transition-all duration-300 hover:shadow-lg animate-fadeIn">
+      <div className="p-8">
+        <div className="mb-6 animate-slideIn">
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">Form information</h2>
+          <p className="text-gray-600">Enter your information and save securely with AES-256 encryption</p>
         </div>
-      )}
+        
+        <div className="space-y-6">
+          {/* First Name Field */}
+          <div className="animate-slideIn" style={{ animationDelay: '0.1s' }}>
+            <label htmlFor="firstName" className="block text-sm font-medium text-gray-700 mb-1">First name</label>
+            <input
+              type="text"
+              id="firstName"
+              name="firstName"
+              value={formData.firstName}
+              onChange={handleInputChange}
+              className={`w-full px-4 py-2 border ${errors.firstName ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors`}
+              placeholder="Input your first name"
+            />
+            {errors.firstName && (
+              <p className="mt-1 text-sm text-red-600">{errors.firstName}</p>
+            )}
+          </div>
+          
+          {/* Email Field */}
+          <div className="animate-slideIn" style={{ animationDelay: '0.2s' }}>
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Email address</label>
+            <input
+              type="email"
+              id="email"
+              name="email"
+              value={formData.email}
+              onChange={handleInputChange}
+              className={`w-full px-4 py-2 border ${errors.email ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors`}
+              placeholder="Input your email address"
+            />
+            {errors.email && (
+              <p className="mt-1 text-sm text-red-600">{errors.email}</p>
+            )}
+          </div>
+          
+          {/* Buttons */}
+          <div className="flex space-x-4 pt-4 animate-slideIn" style={{ animationDelay: '0.3s' }}>
+            <button
+              onClick={handleSave}
+              disabled={isLoading}
+              className={`flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-300 flex items-center justify-center ${isLoading ? 'opacity-70 cursor-not-allowed' : ''} hover:scale-105 transform transition-transform`}
+            >
+              {isLoading ? (
+                <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              ) : null}
+              Save
+            </button>
+            <button
+              onClick={handleLoad}
+              disabled={isLoading}
+              className={`flex-1 bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-300 flex items-center justify-center ${isLoading ? 'opacity-70 cursor-not-allowed' : ''} hover:scale-105 transform transition-transform`}
+            >
+              {isLoading ? (
+                <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              ) : null}
+              Load
+            </button>
+          </div>
+        </div>
+        
+        {/* Message Display */}
+        {message && (
+          <div className={`mt-4 p-3 rounded-lg ${message.includes('successfully') ? 'bg-green-50 text-green-800' : 'bg-orange-50 text-orange-800'} ${showSuccess ? 'animate-pulse' : ''} animate-fadeIn`}>
+            {message}
+          </div>
+        )}
+        
+        {/* Success Animation */}
+        {showSuccess && (
+          <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+            <div className="bg-green-500 bg-opacity-20 rounded-full p-10 animate-ping"></div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

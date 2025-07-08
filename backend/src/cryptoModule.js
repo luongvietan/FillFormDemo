@@ -15,7 +15,7 @@ const SECRET_KEY = crypto.scryptSync('my-secret-key-for-aes-256-encryption', 'sa
 function encrypt(data) {
   try {
     // Create random 16 byte iv
-    const iv = crypto.randomBytes(16);
+    const iv = crypto.randomBytes(16); //initialization vector
     
     // Create cipher with aes-256-cbc algorithm
     const cipher = crypto.createCipheriv('aes-256-cbc', SECRET_KEY, iv);
