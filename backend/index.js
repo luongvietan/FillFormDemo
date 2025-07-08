@@ -1,6 +1,6 @@
 /**
  * Server Express.js provide API for FormFill application
- * Endpoints: /api/save, /api/load
+ * Endpoints: /api/saveFormData, /api/getFormData
  */
 const express = require('express');
 const cors = require('cors');
@@ -20,61 +20,76 @@ app.get('/', (req, res) => {
 });
 
 /**
- * API endpoint to save form data
- * @param {Object} req.body.data - Form data to save
- * @param {number} req.body.expiryDays - Expiry days (default: 7)
+ * API endpoint to save form data with encryption
+ * @param {Object} req.body.data - Form data to encrypt
+ * @param {number} req.body.expiryDays - Number of days before data expires (default: 7)
  */
-app.post('/api/save', (req, res) => {
+app.post('/api/saveFormData', (req, res) => {
   try {
-    const { data, expiryDays } = req.body;
+    const { data } = req.body;
     
     if (!data || typeof data !== 'object') {
       return res.status(400).json({ error: 'Invalid data' });
     }
     
-    // Save data with expiry date
-    const savedData = saveFormData(data, expiryDays || 7);
+    // Get expiry days
+    const expiryDays = req.body.expiryDays || 7;
     
-    // Return saved data (including encrypted data)
-    res.json({
-      encryptedData: savedData.encryptedData,
-      iv: savedData.iv,
-      expiryDate: savedData.expiryDate
-    });
+    // Use saveFormData function
+    const result = saveFormData(data, expiryDays);
+    
+    // Return encrypted data
+    res.json(result);
   } catch (error) {
-    console.error('Error when save data:', error);
-    res.status(500).json({ error: 'Server error when save data' });
+    console.error('Error when saving form data:', error);
+    res.status(500).json({ error: 'Server error when saving form data' });
   }
 });
 
 /**
- * API endpoint to load form data
- * @param {Object} req.body.encryptedData - (Optional) Encrypted data from frontend
+ * API endpoint to get and decrypt form data
+ * @param {string} req.body.encryptedData - Encrypted data from frontend
+ * @param {string} req.body.iv - Initialization vector from frontend
  */
-app.post('/api/load', (req, res) => {
+app.post('/api/getFormData', (req, res) => {
   try {
-    // Get data from file (ignore encryptedData from frontend because we save on server)
-    const formData = getFormData();
+    const { encryptedData, iv } = req.body;
     
-    // Check error
-    if (formData.error) {
-      console.log('Error loading data:', formData.error);
-      return res.status(404).json({ error: formData.error });
+    if (!encryptedData || !iv) {
+      return res.status(400).json({ error: 'Missing encrypted data or IV' });
     }
     
-    // Check expiry date
-    if (formData.expired) {
-      return res.status(410).json({ expired: true, message: 'Data expired' });
-    }
+    // Use getFormData function
+    const data = getFormData(encryptedData, iv);
     
     // Return decrypted data
     res.json({
-      data: formData.data,
-      expiryDate: formData.expiryDate
+      data: data
     });
   } catch (error) {
-    console.error('Error when load data:', error);
-    res.status(500).json({ error: 'Server error when load data' });
+    console.error('Error when getting form data:', error);
+    res.status(500).json({ error: 'Server error when getting form data' });
+  }
+});
+
+// Legacy endpoints for backward compatibility
+app.post('/api/encrypt', (req, res) => {
+  try {
+    const { data, expiryDays } = req.body;
+    const result = saveFormData(data, expiryDays || 7);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/decrypt', (req, res) => {
+  try {
+    const { encryptedData, iv } = req.body;
+    const data = getFormData(encryptedData, iv);
+    res.json({ data });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
   }
 });
 

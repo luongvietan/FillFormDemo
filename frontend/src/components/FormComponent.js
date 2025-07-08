@@ -14,6 +14,8 @@ const FormComponent = () => {
   
   // State for displaying message
   const [message, setMessage] = useState('');
+  // State for validation errors
+  const [errors, setErrors] = useState({});
 
   // Initialize IndexedDB when component mount
   useEffect(() => {
@@ -53,13 +55,45 @@ const FormComponent = () => {
       ...formData,
       [name]: value
     });
+    
+    // Clear validation errors when user types
+    if (errors[name]) {
+      setErrors({
+        ...errors,
+        [name]: ''
+      });
+    }
+  };
+
+  // Validate form data
+  const validateForm = () => {
+    const newErrors = {};
+    
+    if (!formData.firstName.trim()) {
+      newErrors.firstName = 'First Name is required';
+    }
+    
+    if (!formData.email.trim()) {
+      newErrors.email = 'Email is required';
+    } else if (!/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(formData.email)) {
+      newErrors.email = 'Invalid email address';
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
 
   // Save form data to backend (encrypt) and IndexedDB
   const handleSave = async () => {
     try {
+      // Validate form data before saving
+      if (!validateForm()) {
+        setMessage('Please fix the form errors');
+        return;
+      }
+
       // Call API backend to encrypt data
-      const response = await fetch('http://localhost:3001/api/save', {
+      const response = await fetch('http://localhost:3001/api/saveFormData', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -87,7 +121,9 @@ const FormComponent = () => {
         // Save with fixed id 'form1'
         store.put({
           id: 'form1',
-          encryptedData,
+          encryptedData: encryptedData.encryptedData,
+          iv: encryptedData.iv,
+          expiryDate: encryptedData.expiryDate,
           timestamp: new Date().getTime()
         });
         
@@ -123,41 +159,40 @@ const FormComponent = () => {
         const getRequest = store.get('form1');
         
         getRequest.onsuccess = async () => {
-          const data = getRequest.result;
+          const storedData = getRequest.result;
           
-          if (!data) {
+          if (!storedData) {
             setMessage('Data not found in IndexedDB');
+            return;
+          }
+          
+          // Check expiry date
+          const expiryDate = new Date(storedData.expiryDate);
+          const currentDate = new Date();
+          
+          if (currentDate > expiryDate) {
+            setMessage('Data expired');
             return;
           }
           
           try {
             // Call API backend to decrypt
-            const response = await fetch('http://localhost:3001/api/load', {
+            const response = await fetch('http://localhost:3001/api/getFormData', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json'
               },
-              body: JSON.stringify({ encryptedData: data.encryptedData })
+              body: JSON.stringify({ 
+                encryptedData: storedData.encryptedData,
+                iv: storedData.iv
+              })
             });
-            
-            // Handle different HTTP status codes
-            if (response.status === 404) {
-              const errorData = await response.json();
-              setMessage('Error: ' + (errorData.error || 'Data not found on server'));
-              return;
-            }
             
             if (!response.ok) {
               throw new Error('Connection error with server');
             }
             
             const decryptedData = await response.json();
-            
-            // If data expired
-            if (decryptedData.expired) {
-              setMessage('Data expired');
-              return;
-            }
             
             // Update form with decrypted data
             setFormData(decryptedData.data);
@@ -186,14 +221,17 @@ const FormComponent = () => {
       <h1 className="text-xl font-bold mb-4">FormFill Demo</h1>
       
       <div className="mb-4">
-        <label className="block text-gray-700 mb-2">Full Name:</label>
+        <label className="block text-gray-700 mb-2">First Name:</label>
         <input
           type="text"
           name="firstName"
           value={formData.firstName}
           onChange={handleInputChange}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className={`w-full px-3 py-2 border ${errors.firstName ? 'border-red-500' : 'border-gray-300'} rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500`}
         />
+        {errors.firstName && (
+          <p className="text-red-500 text-sm mt-1">{errors.firstName}</p>
+        )}
       </div>
       
       <div className="mb-4">
@@ -203,8 +241,11 @@ const FormComponent = () => {
           name="email"
           value={formData.email}
           onChange={handleInputChange}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className={`w-full px-3 py-2 border ${errors.email ? 'border-red-500' : 'border-gray-300'} rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500`}
         />
+        {errors.email && (
+          <p className="text-red-500 text-sm mt-1">{errors.email}</p>
+        )}
       </div>
       
       <div className="flex space-x-4">
@@ -224,7 +265,7 @@ const FormComponent = () => {
       </div>
       
       {message && (
-        <div className="mt-4 p-2 bg-gray-100 border rounded">
+        <div className={`mt-4 p-2 ${message.includes('Error') ? 'bg-red-100 border-red-300' : message.includes('success') ? 'bg-green-100 border-green-300' : 'bg-gray-100 border-gray-300'} border rounded`}>
           {message}
         </div>
       )}

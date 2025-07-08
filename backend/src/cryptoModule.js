@@ -3,11 +3,6 @@
  * Support encryption and decryption data form
  */
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-
-// File save temporary data instead of database
-const DATA_FILE = path.join(__dirname, '../data.json');
 
 // Hardcoded key 32 bytes (256 bit) for AES-256
 const SECRET_KEY = crypto.scryptSync('my-secret-key-for-aes-256-encryption', 'salt', 32);
@@ -66,93 +61,40 @@ function decrypt(encryptedData, iv) {
 }
 
 /**
- * Save form data encrypted to file
- * @param {Object} data - Form data to save
- * @param {number} expiryDays - Expiry days
- * @returns {Object} - Saved data including encrypted data
+ * Save form data with encryption to be used by IndexedDB
+ * @param {Object} data - Form data to be encrypted and saved
+ * @param {number} expiryDays - Number of days before data expires (default: 7)
+ * @returns {Object} - Object containing encrypted data, iv and expiry date
  */
 function saveFormData(data, expiryDays = 7) {
+  // Encrypt the data
+  const encryptedResult = encrypt(data);
+  
   // Calculate expiry date
   const expiryDate = new Date();
   expiryDate.setDate(expiryDate.getDate() + expiryDays);
   
-  // Encrypt data
-  const encryptedData = encrypt(data);
-  
-  // Save data
-  const saveData = {
-    encryptedData: encryptedData.encryptedData,
-    iv: encryptedData.iv,
-    expiryDate: expiryDate.toISOString(),
-    createdAt: new Date().toISOString()
+  return {
+    encryptedData: encryptedResult.encryptedData,
+    iv: encryptedResult.iv,
+    expiryDate: expiryDate.toISOString()
   };
-  
-  // Check if file exists
-  if (!fs.existsSync(path.dirname(DATA_FILE))) {
-    fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
-  }
-  
-  // Write data to file
-  fs.writeFileSync(DATA_FILE, JSON.stringify(saveData, null, 2));
-  
-  return saveData;
 }
 
 /**
- * Get and decrypt form data from file
- * @returns {Object} - Decrypted data or expired message
+ * Get form data by decrypting stored data
+ * @param {string} encryptedData - Encrypted data string
+ * @param {string} iv - Initialization vector used for encryption
+ * @returns {Object} - Decrypted form data
  */
-function getFormData() {
-  try {
-    // Check if file exists
-    if (!fs.existsSync(DATA_FILE)) {
-      return { error: 'File not found' };
-    }
-    
-    // Read data from file
-    const fileContent = fs.readFileSync(DATA_FILE, 'utf8');
-    
-    // Check if file is empty
-    if (!fileContent || fileContent.trim() === '') {
-      return { error: 'No data available' };
-    }
-    
-    try {
-      const fileData = JSON.parse(fileContent);
-      
-      // Validate required fields
-      if (!fileData.encryptedData || !fileData.iv || !fileData.expiryDate) {
-        return { error: 'Invalid data format' };
-      }
-      
-      // Check expiry date
-      const expiryDate = new Date(fileData.expiryDate);
-      const currentDate = new Date();
-      
-      if (currentDate > expiryDate) {
-        return { expired: true, message: 'Data expired' };
-      }
-      
-      // Decrypt data
-      const decryptedData = decrypt(fileData.encryptedData, fileData.iv);
-      
-      return {
-        data: decryptedData,
-        expiryDate: fileData.expiryDate
-      };
-    } catch (parseError) {
-      console.error('Error parsing data file:', parseError);
-      return { error: 'Invalid data format' };
-    }
-  } catch (error) {
-    console.error('Error when read data:', error);
-    return { error: 'Error when read or decrypt data' };
-  }
+function getFormData(encryptedData, iv) {
+  // Decrypt the data
+  return decrypt(encryptedData, iv);
 }
 
 module.exports = {
-  saveFormData,
-  getFormData,
   encrypt,
-  decrypt
+  decrypt,
+  saveFormData,
+  getFormData
 }; 
