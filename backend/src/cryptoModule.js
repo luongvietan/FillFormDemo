@@ -110,23 +110,40 @@ function getFormData() {
     }
     
     // Read data from file
-    const fileData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    const fileContent = fs.readFileSync(DATA_FILE, 'utf8');
     
-    // Check expiry date
-    const expiryDate = new Date(fileData.expiryDate);
-    const currentDate = new Date();
-    
-    if (currentDate > expiryDate) {
-      return { expired: true, message: 'Data expired' };
+    // Check if file is empty
+    if (!fileContent || fileContent.trim() === '') {
+      return { error: 'No data available' };
     }
     
-    // Decrypt data
-    const decryptedData = decrypt(fileData.encryptedData, fileData.iv);
-    
-    return {
-      data: decryptedData,
-      expiryDate: fileData.expiryDate
-    };
+    try {
+      const fileData = JSON.parse(fileContent);
+      
+      // Validate required fields
+      if (!fileData.encryptedData || !fileData.iv || !fileData.expiryDate) {
+        return { error: 'Invalid data format' };
+      }
+      
+      // Check expiry date
+      const expiryDate = new Date(fileData.expiryDate);
+      const currentDate = new Date();
+      
+      if (currentDate > expiryDate) {
+        return { expired: true, message: 'Data expired' };
+      }
+      
+      // Decrypt data
+      const decryptedData = decrypt(fileData.encryptedData, fileData.iv);
+      
+      return {
+        data: decryptedData,
+        expiryDate: fileData.expiryDate
+      };
+    } catch (parseError) {
+      console.error('Error parsing data file:', parseError);
+      return { error: 'Invalid data format' };
+    }
   } catch (error) {
     console.error('Error when read data:', error);
     return { error: 'Error when read or decrypt data' };

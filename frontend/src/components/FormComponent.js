@@ -126,34 +126,46 @@ const FormComponent = () => {
           const data = getRequest.result;
           
           if (!data) {
-            setMessage('Data not found');
+            setMessage('Data not found in IndexedDB');
             return;
           }
           
-          // Call API backend to decrypt
-          const response = await fetch('http://localhost:3001/api/load', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ encryptedData: data.encryptedData })
-          });
-          
-          if (!response.ok) {
-            throw new Error('Connection error with server');
+          try {
+            // Call API backend to decrypt
+            const response = await fetch('http://localhost:3001/api/load', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ encryptedData: data.encryptedData })
+            });
+            
+            // Handle different HTTP status codes
+            if (response.status === 404) {
+              const errorData = await response.json();
+              setMessage('Error: ' + (errorData.error || 'Data not found on server'));
+              return;
+            }
+            
+            if (!response.ok) {
+              throw new Error('Connection error with server');
+            }
+            
+            const decryptedData = await response.json();
+            
+            // If data expired
+            if (decryptedData.expired) {
+              setMessage('Data expired');
+              return;
+            }
+            
+            // Update form with decrypted data
+            setFormData(decryptedData.data);
+            setMessage('Data loaded successfully');
+          } catch (fetchError) {
+            console.error('Error when call API:', fetchError);
+            setMessage('Error: ' + fetchError.message);
           }
-          
-          const decryptedData = await response.json();
-          
-          // If data expired
-          if (decryptedData.expired) {
-            setMessage('Data expired');
-            return;
-          }
-          
-          // Update form with decrypted data
-          setFormData(decryptedData.data);
-          setMessage('Data loaded successfully');
         };
         
         getRequest.onerror = (error) => {

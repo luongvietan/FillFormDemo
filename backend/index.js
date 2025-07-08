@@ -58,6 +58,7 @@ app.post('/api/load', (req, res) => {
     
     // Check error
     if (formData.error) {
+      console.log('Error loading data:', formData.error);
       return res.status(404).json({ error: formData.error });
     }
     
